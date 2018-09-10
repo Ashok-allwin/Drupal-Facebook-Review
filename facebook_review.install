@@ -1,0 +1,114 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function facebook_review_install() {
+
+    node_types_rebuild();
+    $types = node_type_get_types();
+    node_add_body_field($types['facebook_reviews'],'Review Text');
+    add_custom_fields();
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function facebook_review_uninstall() {
+
+    $ournewtype = 'facebook_reviews';
+    $sql = 'SELECT nid FROM {node} n WHERE n.type = :type';
+    $result = db_query($sql, array(':type' => $ournewtype));
+
+    $nodeids = array();
+
+    foreach ($result as $row) {
+        $nodeids[] = $row->nid;
+    }
+
+    node_delete_multiple($nodeids);
+    delete_custom_fields();
+    node_type_delete($ournewtype);
+    field_purge_batch(500);
+}
+
+
+function _facebook_review_installed_fields() {
+
+    $t = get_t();
+    return array(
+        'facebook_review_fb_id' => array(
+            'field_name' => 'facebook_review_fb_id',
+            'label' => $t('Facebook ID'),
+            'type' => 'text'
+        ),
+        'facebook_review_rating' => array(
+            'field_name' => 'facebook_review_rating',
+            'label' => $t('Rating'),
+            'type' => 'text'
+        )
+    );
+}
+
+function _facebook_review_installed_instances() {
+
+    $t = get_t();
+    return array(
+        'facebook_review_fb_id' => array(
+            'field_name' => 'facebook_review_fb_id',
+            'type' => 'text',
+            'label' => $t('Facebook ID'),
+            'widget' => array(
+                'type' => 'text_textfield'
+            ),
+            'display' => array(
+                'example_node_list' => array(
+                    'label' => $t('Facebook ID'),
+                    'type' => 'text'
+                )
+            )
+        ),
+        'facebook_review_rating' => array(
+            'field_name' => 'facebook_review_rating',
+            'type' => 'text',
+            'label' => $t('Rating'),
+            'widget' => array(
+                'type' => 'text_textfield'
+            ),
+            'display' => array(
+                'example_node_list' => array(
+                    'label' => $t('Rating'),
+                    'type' => 'text'
+                )
+            )
+        )
+    );
+}
+
+
+function add_custom_fields() {
+
+    foreach (_facebook_review_installed_fields() as $field) {
+        field_create_field($field);
+    }
+
+    foreach (_facebook_review_installed_instances() as $fieldinstance) {
+        $fieldinstance['entity_type'] = 'node';
+        $fieldinstance['bundle'] = 'facebook_reviews';
+        print_r($fieldinstance);
+        field_create_instance($fieldinstance);
+    }
+}
+
+function delete_custom_fields() {
+
+    foreach (array_keys(_facebook_review_installed_fields()) as $field) {
+        field_delete_field($field);
+    }
+
+    $instances = field_info_instances('node', 'facebook_reviews');
+
+    foreach ($instances as $instance_name => $fieldinstance) {
+        field_delete_instance($fieldinstance);
+    }
+}

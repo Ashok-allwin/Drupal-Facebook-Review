@@ -1,0 +1,376 @@
+<?php
+
+//Load facebook Sdk.
+require_once('vendor/Facebook/autoload.php');
+
+/**
+ * Implements Hook_menu
+ * @return array
+ */
+function facebook_review_menu() {
+
+  $items = array();
+
+  $items['admin/facebook_review/configuration'] = array(
+    'title' => 'FaceBook Review',
+    'description'       => 'Configuration for the Facebook Review module.',
+    'page callback' => 'facebookAppFrontPage',
+    'access callback' => 'user_access',
+    'access arguments' => array('administer nodes'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 1,
+  );
+
+  $items['admin/facebook_review'] = array(
+    'title' => 'Facebook Review',
+    'description'       => 'Configuration for the Facebook App module.',
+    'page callback' => 'facebookAppSetting',
+    'access callback' => 'user_access',
+    'access arguments' => array('administer nodes'),
+  );
+
+  $items['admin/facebook_review/setting'] = array(
+    'title' => 'Setting',
+    'description'   => 'setting for the Facebook App module.',
+    'page callback' => 'drupal_get_form',
+    'page arguments'    => array('facebook_connect_settings'),
+    'access arguments' => array('administer nodes'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 0,
+  );
+
+  $items['admin/facebook_review/authentication'] = array(
+    'title' => 'FaceBook Authentication',
+    'page callback' => 'facebookAppAuthentication',
+    'access callback' => 'user_access',
+    'access arguments' => array('administer nodes'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements Hook_theme
+ * @return array
+ */
+function facebook_review_theme() {
+
+  return array(
+
+    'connect_page' => array(
+      'variables' => array('url' => null),
+      'template' => 'templates/connect'
+    ),
+
+  );
+}
+
+/**
+ * Menu item callback function.
+ * @return string
+ * @throws Exception
+ */
+function facebookAppFrontPage() {
+
+  global $base_url;
+
+  //Check Facebook app id and secret key given or not.
+  if(!variable_get('fb_app_id') && !variable_get('fb_secret_key')) {
+    drupal_set_message('FacebookApp id and secret key Required','error');
+    drupal_goto('admin/facebook_review');
+  }
+
+  //Facebook SDk initialize.
+  $fb = new Facebook\Facebook([
+    'app_id' => variable_get('fb_app_id'), // Replace {app-id} with your app id
+    'app_secret' => variable_get('fb_secret_key'),
+    'default_graph_version' => variable_get('fb_graph_api'),
+  ]);
+
+  $helper = $fb->getRedirectLoginHelper();
+
+  //Specify redirect url facebook sdk.
+  $redirect_url = $base_url.'/admin/facebook_review/authentication';
+  $permissions = ['email','manage_pages']; // Optional permissions
+  $loginUrl = $helper->getLoginUrl($redirect_url, $permissions);
+  
+  return theme('connect_page',array('url' => $loginUrl,));
+
+}
+
+/**
+ * Menu item callback function.
+ * @return string
+ * @throws Exception
+ */
+function facebookAppAuthentication() {
+
+  //Check Facebook app id and secret key given or not.
+  if(!variable_get('fb_app_id') && !variable_get('fb_secret_key')) {
+    drupal_set_message('FacebookApp id and secret key Required','error');
+    drupal_goto('admin/facebook_review');
+  }
+  //Facebook SDk initialize.
+  $fb = new Facebook\Facebook([
+    'app_id' => variable_get('fb_app_id', ''), 
+    'app_secret' => variable_get('fb_secret_key', ''),
+    'default_graph_version' => variable_get('fb_graph_api'),
+  ]);
+
+  $helper = $fb->getRedirectLoginHelper();
+
+  //Get user access token
+  try {
+    $accessToken = $helper->getAccessToken();
+  } catch(Facebook\Exceptions\FacebookResponseException $e) {
+    // When Graph returns an error
+    drupal_set_message('Graph returned an error: ' . $e->getMessage());
+    drupal_goto('<front>');
+    exit;
+  } catch(Facebook\Exceptions\FacebookSDKException $e) {
+    // When validation fails or other local issues
+    drupal_set_message('Facebook SDK returned an error: ' . $e->getMessage());
+    drupal_goto('<front>');
+    exit;
+  }
+
+  //Check Access token available or not.
+  if (! isset($accessToken)) {
+    if ($helper->getError()) {
+      drupal_set_message("Error Description: " . $helper->getErrorDescription(),'error');
+      drupal_goto('<front>');
+      exit;
+    } else {
+      drupal_set_message('Bad Request');
+      drupal_goto('<front>');
+      exit;
+    }
+  }
+
+  variable_set('user_access_token',$accessToken->getValue());
+  
+  $page_id = variable_get('fb_page_id', '');
+  
+  
+  //Get Page AccessToken.
+  try {
+    // Returns a `Facebook\FacebookResponse` object
+    $response = $fb->get('/'.$page_id.'?fields=access_token',$accessToken->getValue());
+  } catch(Facebook\Exceptions\FacebookResponseException $e) {
+    drupal_set_message('Graph returned an error: ' . $e->getMessage(),'error');
+    drupal_goto('<front>');
+
+  } catch(Facebook\Exceptions\FacebookSDKException $e) {
+    drupal_set_message('Graph returned an error: ' . $e->getMessage(),'error');
+    drupal_goto('<front>');
+
+  }
+
+  $result = $response->getDecodedBody();
+
+  //Store Page AccessToken
+  variable_set('page_access_token',$result['access_token']);
+  
+  drupal_set_message("User AccessToken Collected Successfully");
+  drupal_goto('admin/facebook_review/configuration');
+}
+
+/**
+ * plugin setting page
+ * @return mixed
+ */
+function facebook_connect_settings() {
+
+  $form['general'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Facebook App Setting'),
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+  );
+
+  $form['general']['fb_app_id'] = array(
+    '#type'           => 'textfield',
+    '#default_value' => variable_get('fb_app_id', ''),
+    '#title'          => t('Facebook App Id'),
+    '#required' => TRUE,
+  );
+
+  $form['general']['fb_secret_key'] = array(
+    '#type'           => 'textfield',
+    '#default_value' => variable_get('fb_secret_key', ''),
+    '#title'          => t('Facebook App Secret Key'),
+    '#required' => TRUE,
+  );
+
+  $form['general']['fb_page_id'] = array(
+    '#type'           => 'textfield',
+    '#default_value' => variable_get('fb_page_id', ''),
+    '#title'          => t('Facebook Page ID'),
+    '#required' => TRUE,
+  );
+  $form['general']['fb_graph_api'] = array(
+    '#type'           => 'textfield',
+    '#default_value' => variable_get('fb_graph_api', ''),
+    '#title'          => t('Graph Api Version'),
+    '#required' => TRUE,
+  );
+
+  return system_settings_form($form);
+
+}
+
+/**
+ * Menu item callback function
+ * @return array|mixed
+ */
+function facebookAppSetting() {
+
+  $output = drupal_get_form('facebook_connect_settings');
+  return $output;
+
+}
+
+/**
+ * Cron Hook Creating New Job.
+ * @param $op
+ * @param null $job
+ * @return mixed
+ */
+function facebook_review_cronapi($op, $job = NULL) {
+
+  $items['facebook_review_fetch'] = array(
+    'description' => 'Get all new Review of the page',
+    'rule' => '4 0 * * *',
+    'callback' => 'facebook_review_fetch',
+    'arguments' => array('all'),
+  );
+
+  return $items;
+}
+
+/**
+ * Corn Job Callback.
+ * @param $what
+ */
+function facebook_review_fetch($what) {
+  
+  //Facebook SDk initialize.
+  $fb = new Facebook\Facebook([
+    'app_id' => variable_get('fb_app_id', ''), // Replace {app-id} with your app id
+    'app_secret' => variable_get('fb_secret_key', ''),
+    'default_graph_version' => variable_get('fb_graph_api'),
+  ]);
+  
+  $page_id = variable_get('fb_page_id', '');
+  $token = variable_get('page_access_token','');
+  
+  //Get Page Reviews and Ratings.
+  try {
+    $response = $fb->get('/'.$page_id.'/ratings?fields=review_text,reviewer,rating,created_time&limit=100',$token);
+  
+  } catch(Facebook\Exceptions\FacebookResponseException $e) {
+    drupal_set_message('Graph returned an error: ' . $e->getMessage(),'error');
+    drupal_goto('/user');
+
+  } catch(Facebook\Exceptions\FacebookSDKException $e) {
+    drupal_set_message('Graph returned an error: ' . $e->getMessage(),'error');
+    drupal_goto('/user');
+
+  }
+
+  $reviews = $response->getDecodedBody()['data'];
+  
+  if($reviews[0]['reviewer']=='') {
+	die;  
+  }
+
+  //Remove all previous Reviews.
+  delete_all_reviews();
+  
+
+  foreach ($reviews as $review) {
+    //Creating New node of type Facebook Review.
+    review_node_create($review);
+  }
+
+}
+
+/**
+ * Implements hook_node_info()
+ */
+function facebook_review_node_info() {
+  return array(
+    'facebook_reviews' => array(
+      'name' => t('Facebook Review'),
+      'base' => 'facebook_reviews',
+      'description' => t('You can create facebook Review. More over node will create during cron run.'),
+      'has_title' => TRUE,
+      'title_label' => t('Reviewer Name')
+    )
+  );
+}
+
+/**
+ * Implement hook_form()
+ */
+function facebook_reviews_form($node, $form_state) {
+  return node_content_form($node, $form_state);
+}
+
+/**
+ * Delete All Node of type Facebook Review When Cron run.
+ * @throws Exception
+ */
+function delete_all_reviews() {
+
+  $ournewtype = 'facebook_reviews';
+  
+  $sql = 'SELECT nid FROM {node} n WHERE n.type = :type';
+  $result = db_query($sql, array(':type' => $ournewtype));
+  
+  $nodeids = array();
+  
+  foreach ($result as $row) {
+    $nodeids[] = $row->nid;
+  }
+  
+  node_delete_multiple($nodeids);
+
+}
+
+/**
+ * Create New Node of Type Facebook Review.
+ * @param $review
+ */
+function review_node_create($review) {
+
+  global $user;
+
+  $values = array(
+    'type' => 'facebook_reviews',
+    'uid' => $user->uid,
+    'status' => 1,
+    'comment' => 0,
+    'promote' => 0,
+  );
+  
+  //Creating Node.
+  $entity = entity_create('node', $values);
+  $ewrapper = entity_metadata_wrapper('node', $entity);
+
+  //set Value to node Title
+  $ewrapper->title->set($review['reviewer']['name']);
+  $text =  isset($review['review_text']) ? $review['review_text'] : ' ';
+  
+  //Set value to Node body.
+  $ewrapper->body->set(array('value' => $text));
+  
+  //Set values to Node fileds.
+  $ewrapper->facebook_review_fb_id->set($review['reviewer']['id']);
+  $ewrapper->facebook_review_rating->set($review['rating']);
+
+  //Save new node.
+  $ewrapper->save();
+
+}
